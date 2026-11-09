@@ -20,15 +20,16 @@ pipeline {
 
         stage('Syntax Check') {
             steps {
-                // Gagal bila ada salah tulis di kode Python atau di docker-compose.yml
-                sh 'python3 -m py_compile app.py'
-                sh 'docker compose config -q'
+                // Cek sintaks Python di dalam container (tidak perlu Python di Windows)
+                bat 'docker run --rm -v "%CD%:/src" -w /src python:3.12-slim python -B -m py_compile app.py'
+                // Cek docker-compose.yml valid
+                bat 'docker compose config -q'
             }
         }
 
         stage('Build Image') {
             steps {
-                sh 'docker compose build backend'
+                bat 'docker compose build backend'
             }
         }
 
@@ -36,26 +37,32 @@ pipeline {
             steps {
                 // --force-recreate: container dibuat ulang agar index.html dan nginx.conf
                 // hasil checkout terbaru ikut terpakai. Data aman karena ada di named volume.
-                sh 'docker compose up -d --force-recreate --remove-orphans'
+                bat 'docker compose up -d --force-recreate --remove-orphans'
             }
         }
 
         stage('Health Check') {
             steps {
-                sh '''
-                    for i in $(seq 1 20); do
-                        if curl -fsS http://localhost:5000/health > /dev/null && \
-                           curl -fsS http://localhost:8081/api/votes > /dev/null; then
-                            echo "Health check OK: backend dan frontend merespons"
-                            exit 0
-                        fi
-                        echo "Menunggu aplikasi siap ($i/20)..."
-                        sleep 3
-                    done
-                    echo "Health check GAGAL"
-                    docker compose ps
-                    docker compose logs --tail=50
-                    exit 1
+                powershell '''
+                    $ok = $false
+                    for ($i = 1; $i -le 20; $i++) {
+                        try {
+                            Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/health | Out-Null
+                            Invoke-WebRequest -UseBasicParsing -Uri http://localhost:8081/api/votes | Out-Null
+                            Write-Host 'Health check OK: backend dan frontend merespons'
+                            $ok = $true
+                            break
+                        } catch {
+                            Write-Host "Menunggu aplikasi siap ($i/20)..."
+                            Start-Sleep -Seconds 3
+                        }
+                    }
+                    if (-not $ok) {
+                        Write-Host 'Health check GAGAL'
+                        docker compose ps
+                        docker compose logs --tail=50
+                        exit 1
+                    }
                 '''
             }
         }
