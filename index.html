@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polling Kampus</title>
+  <style>
+    :root { --a: #2563eb; --b: #db2777; --bg: #f4f6fb; --card: #ffffff; --text: #1f2937; --muted: #6b7280; --danger: #dc2626; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .sub { margin: 0 0 20px; color: var(--muted); }
+    .card { background: var(--card); border-radius: 14px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+    .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button { font: inherit; font-weight: 600; cursor: pointer; border: 0; border-radius: 10px; padding: 14px; color: #fff; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .btn-a { background: var(--a); }
+    .btn-b { background: var(--b); }
+    .row { display: flex; justify-content: space-between; font-weight: 600; }
+    .bar { height: 14px; border-radius: 7px; background: #e5e7eb; overflow: hidden; margin: 6px 0 16px; }
+    .fill { height: 100%; width: 0; transition: width .4s; }
+    .fill.a { background: var(--a); }
+    .fill.b { background: var(--b); }
+    .total { color: var(--muted); font-size: .9rem; margin: 0; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eef0f4; }
+    li:last-child { border-bottom: 0; }
+    .tag { font-weight: 700; min-width: 64px; }
+    .tag.a { color: var(--a); }
+    .tag.b { color: var(--b); }
+    .time { color: var(--muted); font-size: .85rem; flex: 1; }
+    .del { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 6px 12px; font-size: .85rem; }
+    .empty { color: var(--muted); text-align: center; padding: 12px 0; }
+    #status { min-height: 1.4em; margin: 0 0 12px; color: var(--danger); font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Campus Poling System</h1>
+    <p class="sub">Pilih opsi favoritmu. Hasil diperbarui otomatis.</p>
+    <p id="status" role="alert"></p>
+
+    <section class="card">
+      <h2>Berikan suaramu</h2>
+      <div class="buttons">
+        <button id="btn-a" class="btn-a" type="button">Pilih Opsi A</button>
+        <button id="btn-b" class="btn-b" type="button">Pilih Opsi B</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Perolehan suara</h2>
+      <div class="row"><span>Opsi A</span><span id="count-a">0 (0%)</span></div>
+      <div class="bar"><div id="fill-a" class="fill a"></div></div>
+      <div class="row"><span>Opsi B</span><span id="count-b">0 (0%)</span></div>
+      <div class="bar"><div id="fill-b" class="fill b"></div></div>
+      <p class="total">Total suara: <strong id="total">0</strong></p>
+    </section>
+
+    <section class="card">
+      <h2>Catatan suara</h2>
+      <ul id="vote-list"></ul>
+    </section>
+  </main>
+
+  <script>
+    // Browser memanggil /api/votes ke Nginx; Nginx meneruskan ke container backend.
+    const API = "/api/votes";
+
+    const statusEl = document.getElementById("status");
+    const voteButtons = [document.getElementById("btn-a"), document.getElementById("btn-b")];
+
+    function setStatus(message) {
+      statusEl.textContent = message || "";
+    }
+
+    async function request(url, options) {
+      const response = await fetch(url, options);
+      let data = null;
+      try { data = await response.json(); } catch (e) { /* balasan bukan JSON */ }
+      if (!response.ok) {
+        throw new Error((data && data.error) || "HTTP " + response.status);
+      }
+      return data;
+    }
+
+    function percent(count, total) {
+      return total === 0 ? 0 : Math.round((count / total) * 100);
+    }
+
+    function render(data) {
+      const total = data.total;
+      ["A", "B"].forEach(function (option) {
+        const key = option.toLowerCase();
+        const count = data.results[option];
+        const pct = percent(count, total);
+        document.getElementById("count-" + key).textContent = count + " (" + pct + "%)";
+        document.getElementById("fill-" + key).style.width = pct + "%";
+      });
+      document.getElementById("total").textContent = total;
+
+      const list = document.getElementById("vote-list");
+      list.innerHTML = "";
+      if (data.votes.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.textContent = "Belum ada suara.";
+        list.appendChild(empty);
+        return;
+      }
+      data.votes.forEach(function (vote, index) {
+        const item = document.createElement("li");
+
+        const tag = document.createElement("span");
+        tag.className = "tag " + vote.option.toLowerCase();
+        tag.textContent = "#" + index + " Opsi " + vote.option;
+
+        const time = document.createElement("span");
+        time.className = "time";
+        time.textContent = new Date(vote.time).toLocaleString("id-ID");
+
+        const del = document.createElement("button");
+        del.className = "del";
+        del.type = "button";
+        del.textContent = "Delete";
+        del.addEventListener("click", function () { removeVote(index); });
+
+        item.append(tag, time, del);
+        list.appendChild(item);
+      });
+    }
+
+    async function loadVotes() {
+      try {
+        render(await request(API));
+        setStatus("");
+      } catch (error) {
+        setStatus("Gagal terhubung ke backend: " + error.message);
+      }
+    }
+
+    async function sendVote(option) {
+      voteButtons.forEach(function (b) { b.disabled = true; });
+      try {
+        const data = await request(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ option: option })
+        });
+        render(data);
+        setStatus("");
+      } catch (error) {
+        setStatus("Gagal mengirim suara: " + error.message);
+      } finally {
+        voteButtons.forEach(function (b) { b.disabled = false; });
+      }
+    }
+
+    async function removeVote(index) {
+      try {
+        render(await request(API + "?index=" + index, { method: "DELETE" }));
+        setStatus("");
+      } catch (error) {
+        setStatus("Gagal menghapus: " + error.message);
+        loadVotes();
+      }
+    }
+
+    document.getElementById("btn-a").addEventListener("click", function () { sendVote("A"); });
+    document.getElementById("btn-b").addEventListener("click", function () { sendVote("B"); });
+
+    loadVotes();
+    setInterval(loadVotes, 5000); // segarkan otomatis tiap 5 detik
+  </script>
+</body>
+</html>
